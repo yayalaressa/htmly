@@ -1,23 +1,21 @@
 <?php if (!defined('HTMLY')) die('HTMLy'); ?>
 <h2 class="post-index"><?php echo $heading ?></h2>
 <br>
-<a class="btn btn-primary right" href="<?php echo site_url();?>admin/content"><?php echo i18n('Add_new_post');?></a>
+<a class="btn btn-primary right" href="<?php echo site_url();?>add/author"><?php echo i18n('Add_author');?></a>
 <br><br>
-<?php if (!empty($posts)) { ?>
+<?php if (!empty($authors)) { ?>
     <table id="htmly-table" class="table post-list" style="width:100%">
-        <thead>
-        <tr class="head">
-            <th><?php echo i18n('Title');?></th>
-            <th><?php echo i18n('Created');?></th>
-            <th><?php echo i18n('Category');?></th>
-            <th><?php echo i18n('Tags');?></th>
-            <th><?php echo i18n('Operations');?></th>
-        </tr>
-        </thead>
-        <tbody>
+    <thead>
+    <tr class="head">
+        <th><?php echo i18n('Title');?></th>
+        <th><?php echo i18n('Username');?></th>
+        <th><?php echo i18n('Operations');?></th>
+    </tr>
+    </thead>
+    <tbody>
         <?php $i = 0;
-        $len = count($posts); ?>
-        <?php foreach ($posts as $p): ?>
+        $len = count($authors); ?>
+        <?php foreach ($authors as $a): ?>
             <?php
             if ($i == 0) {
                 $class = 'item first';
@@ -28,15 +26,17 @@
             }
             $i++;
             ?>
+            <?php
+            $user = $_SESSION[config("site.url")]['user'];
+            ?>
             <tr class="<?php echo $class ?>">
-                <td><?php echo $p->title ?></td>
-                <td><?php echo format_date($p->date) ?></td>
-                <td><a href="<?php echo str_replace('category', 'admin/categories', $p->categoryUrl); ?>"><?php echo strip_tags($p->category);?></a></td>
-                <td><?php echo $p->tag ?></td>
-                <td><a class="btn btn-primary btn-sm" href="<?php echo $p->url ?>/edit?destination=admin/draft"><?php echo i18n('Edit');?></a> <a class="btn btn-danger btn-sm" href="<?php echo $p->url ?>/delete?destination=admin/draft"><?php echo i18n('Delete');?></a></td>
+                <td><a target="_blank" href="<?php echo $a->url ?>"><?php echo $a->title ?></a></td>
+                <td><?php echo $a->username ?></td>
+                <td><a class="btn btn-primary btn-sm" href="<?php echo $a->url ?>/edit?destination=admin/authors"><?php echo i18n('Edit');?></a> <?php if($user !== $a->username): ?><a
+                        class="btn btn-danger btn-sm" href="<?php echo $a->url ?>/delete?destination=admin/authors"><?php echo i18n('Delete');?></a><?php endif; ?></td>
             </tr>
         <?php endforeach; ?>
-        </tbody>
+    </tbody>
     </table>
 <?php if (!empty($pagination['prev']) || !empty($pagination['next'])): ?>
 <br>
@@ -57,5 +57,5 @@
     </div>
 <?php endif; ?>
 <?php } else {
-    echo i18n('No_draft_found') . '!';
+    echo i18n('No_authors_found') . '!';
 } ?>

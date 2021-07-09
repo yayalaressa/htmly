@@ -39,6 +39,146 @@ function create_user($userName, $password, $role = "user")
     }
 }
 
+// Add author 
+function add_author($title, $user, $password, $content)
+{
+    create_user($user, $password);
+
+    $user_title = safe_html($title);
+    $user_content = '<!--t ' . $user_title . ' t-->' . "\n\n" . $content;
+
+    if (!empty($user_title) && !empty($user_content)) {
+
+        $user_content = stripslashes($user_content);
+
+        $dir = 'content/' . $user . '/';
+        $filename = 'content/' . $user . '/author.md';
+        if (is_dir($dir)) {
+            file_put_contents($filename, print_r($user_content, true));
+        } else {
+            mkdir($dir, 0775, true);
+            file_put_contents($filename, print_r($user_content, true));
+        }
+        rebuilt_cache('all');
+        $redirect = site_url() . 'admin/authors';
+        header("Location: $redirect");
+    }
+}
+
+// Edit author
+function edit_author($name, $title, $user, $password, $content)
+{
+    $name = get_author_info($name);
+    $name = $name[0];
+
+    // Jika edit tanpa ganti password
+    if(empty($password)) {
+        $file = 'config/users/' . $user . '.ini';
+        if (!file_exists($file))
+        {
+            // Hanya akan dieksekusi ketika tidak melakukan penggantian password namun melakukan penggantian username
+            file_put_contents($file, "password = " . $name->password . "\n" .
+                "encryption = password_hash\n" .
+                "role = " . $name->role . "\n");
+        }
+    } else {
+        // jika melakukan pergantian password
+        create_user($user, $password, $name->role);
+    }
+
+    $user_title = safe_html($title);
+    $user_content = '<!--t ' . $user_title . ' t-->' . "\n\n" . $content;
+
+    if (!empty($user_title) && !empty($user_content)) {
+        
+        $user_content = stripslashes($user_content);
+
+        $dir = 'content/' . $user . '/';
+        $filename = 'content/' . $user . '/author.md';
+        if (is_dir($dir)) {
+            file_put_contents($filename, print_r($user_content, true));
+        } else {
+            mkdir($dir, 0775, true);
+            file_put_contents($filename, print_r($user_content, true));
+        }
+
+        // Jika username lama tidak sama dengan yang baru maka file username lama akan dihapus
+        if($name->username !== $user) {
+            // copying all content and file dari username lama ke username baru
+            copy_folders('content/' . $name->username, 'content/' . $user);
+            remove_folders('content/' . $name->username);
+            // Jika username sesi sama dengan username lama
+            if($_SESSION[config("site.url")]['user'] === $name->username) {
+                if (session_status() == PHP_SESSION_NONE) session_start();
+                $_SESSION[config("site.url")]['user'] = $user;
+            }
+            unlink($name->file);
+        }
+
+        rebuilt_cache('all');
+        $redirect = site_url() . 'admin/authors';
+        header("Location: $redirect");
+    }
+}
+
+// Check old password
+function valid_password($user, $pass)
+{
+    $user_enc = user('encryption', $user);
+    $user_pass = user('password', $user);
+    $user_role = user('role', $user);
+
+    if ($user_enc == "password_hash") {
+        if (password_verify($pass, $user_pass)) {
+            if (password_needs_rehash($user_pass, PASSWORD_DEFAULT)) {
+                update_user($user, $pass, $user_role);
+            }
+            return true;
+        } else {
+            return false;
+        }
+    } else if (old_password_verify($pass, $user_enc, $user_pass)) {
+        update_user($user, $pass, $user_role);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+// Check username exists
+function username_exists($username, $user = null)
+{
+    // Jika username baru tidak sama dengan username lama
+    if($username !== $user || $user === null) {
+        $file = 'config/users/' . $username . '.ini';
+        if(file_exists($file))
+        {
+            return true;
+        } else {
+            return false;
+        }
+    } else { // Jika username baru sama dengan username lama
+        $file = 'config/users/' . $username . '.ini';
+        if(!file_exists($file))
+        {
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+// Matching password and password confirm
+function password_match($password, $confirm)
+{
+    if($password === $confirm)
+    {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 // Create a session
 function session($user, $pass)
 {
@@ -47,29 +187,15 @@ function session($user, $pass)
         return $str = '<div class="error-message"><ul><li class="alert alert-danger">ERROR: Invalid username or password.</li></li></div>';
     }
 
-    $user_enc = user('encryption', $user);
-    $user_pass = user('password', $user);
-    $user_role = user('role', $user);
-
-    if ($user_enc == "password_hash") {
-        if (password_verify($pass, $user_pass)) {
-            if (session_status() == PHP_SESSION_NONE) session_start();
-            if (password_needs_rehash($user_pass, PASSWORD_DEFAULT)) {
-                update_user($user, $pass, $user_role);
-            }
-            $_SESSION[config("site.url")]['user'] = $user;
-            header('location: admin');
-        } else {
-            return $str = '<div class="error-message"><ul><li class="alert alert-danger">ERROR: Invalid username or password.</li></li></div>';
-        }
-    } else if (old_password_verify($pass, $user_enc, $user_pass)) {
+    if(valid_password($user, $pass))
+    {
         if (session_status() == PHP_SESSION_NONE) session_start();
-        update_user($user, $pass, $user_role);
         $_SESSION[config("site.url")]['user'] = $user;
         header('location: admin');
     } else {
         return $str = '<div class="error-message"><ul><li class="alert alert-danger">ERROR: Invalid username or password.</li></li></div>';
     }
+
 }
 
 function old_password_verify($pass, $user_enc, $user_pass)
@@ -702,6 +828,38 @@ function edit_frontpage($title, $content)
     }
 }
 
+// Delete author
+function delete_author($file, $destination)
+{
+    if (!login())
+        return null;
+    $deleted_content = $file;
+
+    if (!empty($deleted_content)) {
+
+        $str = explode('/', $file);
+        $str = str_replace('.ini', '', $str);
+        $username = $str[2];
+
+        $dir = 'content/' . $username . '/';
+
+        $user = $_SESSION[config("site.url")]['user'];
+        // Melarang untuk menghapus diri sendiri, karena bunuh diri itu dosa :D
+        if($user !== $username) {
+            remove_folders($dir);
+            unlink($deleted_content);
+            rebuilt_cache('all');
+        }
+        if ($destination == 'author') {
+            $redirect = site_url();
+            header("Location: $redirect");
+        } else {
+            $redirect = site_url() . $destination;
+            header("Location: $redirect");
+        }
+    }
+}
+
 // Delete blog post
 function delete_post($file, $destination)
 {
@@ -836,11 +994,12 @@ function get_user_posts()
     if (isset($_SESSION[config("site.url")]['user'])) {
         $posts = get_profile_posts($_SESSION[config("site.url")]['user'], 1, 5);
         if (!empty($posts)) {
-            echo '<table class="table post-list">';
-            echo '<tr class="head"><th>' . i18n('Title') . '</th><th>' . i18n('Published') . '</th>';
+            echo '<table id="htmly-table" class="table post-list" style="width:100%">';
+            echo '<thead><tr class="head"><th>' . i18n('Title') . '</th><th>' . i18n('Published') . '</th>';
             if (config("views.counter") == "true")
                 echo '<th>'.i18n('Views').'</th>';
-            echo '<th>' . i18n('Category') . '</th><th>' . i18n('Tags') . '</th><th>' . i18n('Operations') . '</th></tr>';
+            echo '<th>' . i18n('Category') . '</th><th>' . i18n('Tags') . '</th><th>' . i18n('Operations') . '</th></tr></thead>';
+            echo '<tbody>';
             $i = 0;
             $len = count($posts);
             foreach ($posts as $p) {
@@ -859,9 +1018,10 @@ function get_user_posts()
                     echo '<td>' . $p->views . '</td>';
                 echo '<td><a href="' . str_replace('category', 'admin/categories', $p->categoryUrl) . '">'. strip_tags($p->category) .'</a></td>';
                 echo '<td>' . $p->tag . '</td>';
-                echo '<td><a class="btn btn-primary btn-xs" href="' . $p->url . '/edit?destination=admin">' . i18n('Edit') . '</a> <a class="btn btn-danger btn-xs" href="' . $p->url . '/delete?destination=admin">' . i18n('Delete') . '</a></td>';
+                echo '<td><a class="btn btn-primary btn-sm" href="' . $p->url . '/edit?destination=admin">' . i18n('Edit') . '</a> <a class="btn btn-danger btn-sm" href="' . $p->url . '/delete?destination=admin">' . i18n('Delete') . '</a></td>';
                 echo '</tr>';
             }
+            echo '</tbody>';
             echo '</table>';
         }
     }
@@ -874,11 +1034,12 @@ function get_user_pages()
         $posts = get_static_post(null);
         if (!empty($posts)) {
             krsort($posts);
-            echo '<table class="table post-list">';
-            echo '<tr class="head"><th>' . i18n('Title') . '</th>';
+            echo '<table id="htmly-table" class="table post-list" style="width:100%">';
+            echo '<thead><tr class="head"><th>' . i18n('Title') . '</th>';
             if (config("views.counter") == "true")
                 echo '<th>'.i18n('Views').'</th>';
-            echo '<th>' . i18n('Operations') . '</th></tr>';
+            echo '<th>' . i18n('Operations') . '</th></tr></thead>';
+            echo '<tbody>';
             $i = 0;
             $len = count($posts);
             foreach ($posts as $p) {
@@ -895,7 +1056,7 @@ function get_user_pages()
                 echo '<td><a target="_blank" href="' . $p->url . '">' . $p->title . '</a></td>';
                 if (config("views.counter") == "true")
                     echo '<td>' . $p->views . '</td>';
-                echo '<td><a class="btn btn-primary btn-xs" href="' . $p->url . '/add?destination=admin/pages">' . i18n('Add_sub') . '</a> <a class="btn btn-primary btn-xs" href="' . $p->url . '/edit?destination=admin/pages">' . i18n('Edit') . '</a> <a class="btn btn-danger btn-xs" href="' . $p->url . '/delete?destination=admin/pages">' . i18n('Delete') . '</a></td>';
+                echo '<td><a class="btn btn-primary btn-sm" href="' . $p->url . '/add?destination=admin/pages">' . i18n('Add_sub') . '</a> <a class="btn btn-primary btn-sm" href="' . $p->url . '/edit?destination=admin/pages">' . i18n('Edit') . '</a> <a class="btn btn-danger btn-sm" href="' . $p->url . '/delete?destination=admin/pages">' . i18n('Delete') . '</a></td>';
                 echo '</tr>';
 
                 $shortUrl = substr($p->url, strrpos($p->url, "/") + 1);
@@ -906,10 +1067,11 @@ function get_user_pages()
                     echo '<td> <span style="margin-left:30px;">&raquo; <a target="_blank" href="' . $sp->url . '">' . $sp->title . '</a></span></td>';
                     if (config("views.counter") == "true")
                         echo '<td>' . $sp->views . '</td>';
-                    echo '<td><a class="btn btn-primary btn-xs" href="' . $sp->url . '/edit?destination=admin/pages">' . i18n('Edit') . '</a> <a class="btn btn-danger btn-xs" href="' . $sp->url . '/delete?destination=admin/pages">' . i18n('Delete') . '</a></td>';
+                    echo '<td><a class="btn btn-primary btn-sm" href="' . $sp->url . '/edit?destination=admin/pages">' . i18n('Edit') . '</a> <a class="btn btn-danger btn-sm" href="' . $sp->url . '/delete?destination=admin/pages">' . i18n('Delete') . '</a></td>';
                     echo '</tr>';
                 }
             }
+            echo '</tbody>';
             echo '</table>';
         }
     }
@@ -922,7 +1084,7 @@ function get_backup_files()
         $files = get_zip_files();
         if (!empty($files)) {
             krsort($files);
-            echo '<table class="table backup-list">';
+            echo '<table id="htmly-table" class="table backup-list" style="width:100%">';
             echo '<tr class="head"><th>' . i18n('Filename') . '</th><th>'.i18n('Date').'</th><th>' . i18n('Operations') . '</th></tr>';
             $i = 0;
             $len = count($files);
@@ -954,7 +1116,7 @@ function get_backup_files()
                 echo '<tr class="' . $class . '">';
                 echo '<td>' . $name . '</td>';
                 echo '<td>' . $timestamp . '</td>';
-                echo '<td><a class="btn btn-primary btn-xs" target="_blank" href="' . $url . '">Download</a> <form method="GET"><input type="hidden" name="file" value="' . $name . '"/><input type="submit" class="btn btn-danger btn-xs" name="submit" value="Delete"/></form></td>';
+                echo '<td><a class="btn btn-primary btn-sm" target="_blank" href="' . $url . '">Download</a> <form method="GET"><input type="hidden" name="file" value="' . $name . '"/><input type="submit" class="btn btn-danger btn-sm" name="submit" value="Delete"/></form></td>';
                 echo '</tr>';
             }
             echo '</table>';

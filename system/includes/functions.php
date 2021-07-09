@@ -6,6 +6,65 @@ use \Suin\RSSWriter\Feed;
 use \Suin\RSSWriter\Channel;
 use \Suin\RSSWriter\Item;
 
+// Get all authors
+function get_authors()
+{
+    $tmp = array();
+    foreach (glob('config/users/*.ini', GLOB_NOSORT) as $key => $value) {
+        if(preg_match('/config\/users\/(.*)\.ini/i', $value, $matches)) {
+
+            $user = new stdClass;
+            $user->username = $matches[1];
+            $user->password = user('password', $matches[1]);
+            $user->role = user('role', $matches[1]);
+            $user->url = site_url() . 'author/' . $matches[1];
+            $user->file = $value;
+            
+	        $filename = 'content/' . $matches[1] . '/author.md';
+	        if (file_exists($filename)) {
+		        $content = file_get_contents($filename);
+		        $user->title = get_content_tag('t', $content, 'user');
+		        $user->content = remove_html_comments($content);
+	        } else {
+		        $user->title = $matches[1];
+		        $user->content = 'Just another HTMLy user.';
+	        }
+
+            $tmp[] = $user;
+        }
+    }
+    return $tmp;
+}
+
+// Get author info
+function get_author_info($author)
+{
+    $tmp = array();
+    $value = 'config/users/' . $author . '.ini';
+    if(preg_match('/config\/users\/(.*)\.ini/i', $value, $matches)) {
+
+        $user = new stdClass;
+        $user->username = $matches[1];
+        $user->password = user('password', $matches[1]);
+        $user->role = user('role', $matches[1]);
+        $user->url = site_url() . 'author/' . $matches[1];
+        $user->file = $value;
+        
+        $filename = 'content/' . $matches[1] . '/author.md';
+        if (file_exists($filename)) {
+            $content = file_get_contents($filename);
+            $user->title = get_content_tag('t', $content, 'user');
+            $user->content = remove_html_comments($content);
+        } else {
+            $user->title = $matches[1];
+            $user->content = 'Just another HTMLy user.';
+        }
+
+        $tmp[] = $user;
+    }
+    return $tmp;
+}
+
 // Get blog post path. Unsorted. Mostly used on widget.
 function get_post_unsorted()
 {
@@ -303,10 +362,10 @@ function get_posts($posts, $page = 1, $perpage = 0)
         $dt = str_replace($replaced, '', $arr[0]);
         $t = str_replace('-', '', $dt);
         $time = new DateTime($t);
-        $timestamp = $time->format("Y-m-d H:i:s");
+        $date = $time->format("Y-m-d H:i:s");
 
         // The post date
-        $post->date = strtotime($timestamp);
+        $post->date = strtotime($date);
 
         // The archive per day
         $post->archive = site_url() . 'archive/' . date('Y-m', $post->date);
@@ -2385,10 +2444,10 @@ function sitemap_post_path()
         $dt = str_replace($replaced, '', $arr[0]);
         $t = str_replace('-', '', $dt);
         $time = new DateTime($t);
-        $timestamp = $time->format("Y-m-d H:i:s");
+        $date = $time->format("Y-m-d H:i:s");
 
         // The post date
-        $post->date = strtotime($timestamp);
+        $post->date = strtotime($date);
 
         // The archive per day
         $post->archiveday = site_url() . 'archive/' . date('Y-m-d', $post->date);
@@ -2884,8 +2943,6 @@ function head_contents()
 // Return toolbar
 function toolbar()
 {
-    $user = $_SESSION[config("site.url")]['user'];
-    $role = user('role', $user);
     $base = site_url();
 
     echo <<<EOF
@@ -2894,7 +2951,7 @@ EOF;
     echo '<div id="toolbar"><ul>';
     echo '<li class="tb-admin"><a href="' . $base . 'admin">' . i18n('Admin') . '</a></li>';
     echo '<li class="tb-addcontent"><a href="' . $base . 'admin/content">' . i18n('Add_content') . '</a></li>';
-    if ($role === 'admin') {
+    if (is_admin()) {
         echo '<li class="tb-posts"><a href="' . $base . 'admin/posts">' . i18n('Posts') . '</a></li>';
         if (config('views.counter') == 'true') {
             echo '<li class="tb-popular"><a href="' . $base . 'admin/popular">Popular</a></li>';
@@ -2902,11 +2959,12 @@ EOF;
     }
     echo '<li class="tb-mine"><a href="' . $base . 'admin/pages">Pages</a></li>';
     echo '<li class="tb-draft"><a href="' . $base . 'admin/draft">' . i18n('Draft') . '</a></li>';
-    if ($role === 'admin') {
+    if (is_admin()) {
         echo '<li class="tb-categories"><a href="' . $base . 'admin/categories">' . i18n('Categories') . '</a></li>';
+        echo '<li class="tb-authors"><a href="' . $base . 'admin/authors">' . i18n('Authors') . '</a></li>';
     }
     echo '<li class="tb-import"><a href="' . $base . 'admin/menu">Menu</a></li>';
-    if ($role === 'admin') {
+    if (is_admin()) {
       echo '<li class="tb-config"><a href="' . $base . 'admin/config">' . i18n('Config') . '</a></li>';
     }
     echo '<li class="tb-backup"><a href="' . $base . 'admin/backup">' . i18n('Backup') . '</a></li>';
@@ -3244,12 +3302,47 @@ function format_date($date)
 
     $date_format = config('date.format');
 
-    if (!isset($date_format) || empty($date_format)) {
-        return strftime('%e %B %Y', $date);
+    // Timeago
+    if(config('timeago.format') == 'true') {
+        $time = time() - $date;
+        if ($time < 60) {
+        return ( $time > 1 ) ? $time . ' ' . i18n('Seconds_ago') : i18n('A_second_ago');
+        }
+        elseif ($time < 3600) {
+        $tmp = floor($time / 60);
+        return ($tmp > 1) ? $tmp . ' ' . i18n('Minutes_ago') : i18n('A_minute_ago');
+        }
+        elseif ($time < 86400) {
+        $tmp = floor($time / 3600);
+        return ($tmp > 1) ? $tmp . ' ' . i18n('Hours_ago') : i18n('An_hour_ago');
+        }
+        elseif ($time < 2592000) {
+        $tmp = floor($time / 86400);
+        return ($tmp > 1) ? $tmp . ' ' . i18n('Days_ago') : i18n('Yesterday');
+        }
+        elseif ($time < 946080000) {
+            if (!isset($date_format) || empty($date_format)) {
+                return strftime('%e %B %Y', $date);
+            } else {
+                return strftime($date_format, $date);
+            }
+        }
+        else {
+        $tmp = floor($time / 946080000);
+            if (!isset($date_format) || empty($date_format)) {
+                return strftime('%e %B %Y', $date);
+            } else {
+                return strftime($date_format, $date);
+            }
+        }
     } else {
-        return strftime($date_format, $date);
+        // Default
+        if (!isset($date_format) || empty($date_format)) {
+            return strftime('%e %B %Y', $date);
+        } else {
+            return strftime($date_format, $date);
+        }
     }
-
 }
 
 function valueMaker($value)
