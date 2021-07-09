@@ -44,6 +44,9 @@ Features
 - Post Draft
 - i18n
 - Menu builder
+- Cache Minify (optional)
+- Posts Date display like Social Media (optional)
+- Authors Menu (e.g. Add Author, Edit Author, Delete Author)
 
 Requirements
 ------------
