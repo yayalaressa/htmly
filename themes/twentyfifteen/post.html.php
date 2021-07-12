@@ -30,6 +30,7 @@
     </header>
     <div class="entry-content">
         <?php echo $p->body; ?>
+        <?php echo get_comment($comment, $p->url); ?>
     </div>
     <style>.related {padding-bottom:2em;}.related p {margin-top:0;margin-bottom:0.5em;} .related ul {margin-left:1em;}</style>
     <div class="related entry-content">

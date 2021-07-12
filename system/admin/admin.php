@@ -39,6 +39,41 @@ function create_user($userName, $password, $role = "user")
     }
 }
 
+// Add comment
+function add_comment($current_url, $post_url, $name, $email, $url, $comment, $reply = null)
+{
+    $name = "<!--n " . $name . " n-->";
+    $email = "\n<!--e " . $email . " e-->";
+    if(preg_match('/(http|https)\:\/\/(.*)?/', $url, $matches)) {
+        $url = "\n<!--u " . $url . " u-->";
+    } else {
+        $url = "\n<!--u http://" . $url . " u-->";
+    }
+    $reply = "";
+    if(!empty($replay)) {
+        $reply = "\n<!--r " . $reply . " r-->";
+    }
+    $time = "\n<!--time " . time() . " time-->";
+    $post_comment = $name . $email . $url . $reply . $time . "\n" . valueMaker($comment);
+
+    $dir = "content/comment/" . $post_url;
+    if(!is_dir($dir)) {
+        mkdir($dir, 0775, true);
+    }
+    $files = glob($dir . "/*.md", GLOB_NOSORT);
+    $i = 0;
+    for($i = 0; $i <= count($files); $i++) {
+        if ($i == count($files)) {
+            break;
+        }
+    }
+    $file = $dir . "/" . $i . ".md";
+    file_put_contents($file, $post_comment);
+    rebuilt_cache('comments');
+    $redirect = $current_url;
+    header("Location: $redirect");
+}
+
 // Add author 
 function add_author($title, $user, $password, $content)
 {
@@ -531,6 +566,17 @@ function edit_content($title, $tag, $url, $content, $oldfile, $destination = nul
             $posturl = site_url() . date('Y/m', $postdate) . '/' . $post_url;
         }
 
+        // Feature the comment for post
+        $olddir_comment = str_replace('.md', '', $oldurl[2]);
+        if($post_url !== $olddir_comment) {
+            // If url is change, move dir comment!
+            if(!is_dir('content/comment/' . $post_url)) {
+                mkdir('content/comment/' . $post_url, 0775, true);
+            }
+            copy_folders('content/comment/' . $olddir_comment, 'content/comment/' . $post_url);
+            remove_folders('content/comment/' . $olddir_comment);
+        }
+
         save_tag_i18n($post_tag, $post_tagmd);
 
         rebuilt_cache('all');
@@ -826,6 +872,14 @@ function edit_frontpage($title, $content)
         $redirect = site_url();
         header("Location: $redirect");
     }
+}
+
+// Delete comment
+function delete_comment($name)
+{
+    // Delete dir comment
+    remove_folders('content/comment/' . $name);
+    rebuilt_cache('comments');
 }
 
 // Delete author

@@ -6,6 +6,90 @@ use \Suin\RSSWriter\Feed;
 use \Suin\RSSWriter\Channel;
 use \Suin\RSSWriter\Item;
 
+// Show the comment
+function comment($locals, $url)
+{
+    $url = str_replace(site_url(), '', $url);
+    if(!preg_match('/[0-9]+\/[0-9]+\/([a-zA-Z0-9\-]+)?/', $url, $matches)) {
+        // if permalink set /post/your-post-slug
+        preg_match('/post\/([a-zA-Z0-9\-]+)?/', $url, $matches);
+    } else {
+        // if permalink set /year/month/your-post-slug
+        preg_match('/[0-9]+\/[0-9]+\/([a-zA-Z0-9\-]+)?/', $url, $matches);
+    }
+    $dir_comment = $matches[1];
+    $dir = 'content/comment/' . $dir_comment;
+    if (is_dir($dir) === false) {
+        mkdir($dir, 0775, true);
+    }
+
+    // Get data comment
+    $comments_list = get_comment($dir);
+
+    if (is_array($locals) && count($locals)) {
+        extract($locals, EXTR_SKIP);
+    }
+
+    // Display views
+    $vroot = rtrim(config('views.root'), '/');
+    $tpl = $vroot . '/comment.html.php';
+    
+    if(file_exists($tpl)) {
+        ob_start();
+        // display comments if we have themes for comments (e.g. /your-theme/comment.html.php)
+        include $tpl;
+        echo content(trim(ob_get_clean()));
+    } else {
+        ob_start();
+        // display comments if we don't have themes for comments (e.g. /your-theme/comment.html.php)
+        include 'system/resources/comment.html.php';
+        echo '<p>Comment template by <a href="http://www.htmly.com" target="_blank" rel="nofollow">HTMLy</a></p>';
+        echo content(trim(ob_get_clean()));
+    }
+
+}
+
+// Get comments
+function get_comment($dir)
+{
+    // Get data comment
+    $tmp = array();
+    foreach(get_comment_sorted() as $k => $v) {
+        if($v['dirname'] === $dir) {
+            // Read data
+            $content = file_get_contents($v['dirname'] . '/' . $v['basename']);
+
+            $comments = new stdClass;
+            $comments->num = $v['filename'];
+            $comments->comment = $v['dirname'];
+            $comments->name = get_content_tag('n', $content);
+            $comments->email = get_content_tag('e', $content);
+            $comments->url = get_content_tag('u', $content);
+            $comments->reply = get_content_tag('r', $content);
+            $comments->time = get_content_tag('time', $content);
+            // Get the contents and convert it to HTML
+            $comments->body = MarkdownExtra::defaultTransform(remove_html_comments($content));
+            $tmp[] = $comments;
+        }
+    }
+
+    return $tmp;
+}
+
+// Get reply comments
+function get_comment_reply($comment, $num)
+{
+    $comments_list = get_comment($comment);
+    $tmp = array();
+    foreach($comments_list as $r) {
+        if($r->reply == $num) {
+            $tmp[] = $r;
+        }
+    }
+
+    return $tmp;
+}
+
 // Get all authors
 function get_authors()
 {
@@ -63,6 +147,37 @@ function get_author_info($author)
         $tmp[] = $user;
     }
     return $tmp;
+}
+
+// Get comments. Unsorted. Mostly used on widget.
+function get_comment_unsorted()
+{
+    static $_unsorted = array();
+
+    if (empty($_unsorted)) {
+
+        $url = 'cache/index/index-comment-unsorted.txt';
+        if (!file_exists($url)) {
+            rebuilt_cache('all');
+        }
+        $_unsorted = unserialize(file_get_contents($url));
+    }
+    return $_unsorted;
+}
+
+// Get comments with more info about the path. Sorted by filename.
+function get_comment_sorted()
+{
+    static $_sorted = array();
+
+    if (empty($_sorted)) {
+        $url = 'cache/index/index-comment-sorted.txt';
+        if (!file_exists($url)) {
+            rebuilt_cache('all');
+        }
+        $_sorted = unserialize(file_get_contents($url));
+    }
+    return $_sorted;
 }
 
 // Get blog post path. Unsorted. Mostly used on widget.
@@ -233,6 +348,8 @@ function rebuilt_cache($type)
     $dir = 'cache/index';
     $posts_cache_sorted = array();
     $posts_cache_unsorted = array();
+    $comments_cache_sorted = array();
+    $comments_cache_unsorted = array();
     $page_cache = array();
     $author_cache = array();
 
@@ -266,6 +383,28 @@ function rebuilt_cache($type)
         usort($posts_cache_sorted, "sortfile");
         $string = serialize($posts_cache_sorted);
         file_put_contents('cache/index/index-sorted.txt', print_r($string, true));
+    } elseif ($type === 'comments') {
+        $tmpu = array();
+        $tmpu = glob('content/comment/*/*.md', GLOB_NOSORT);
+         if (is_array($tmpu)) {
+            foreach ($tmpu as $fileu) {
+                $comments_cache_unsorted[] = $fileu;
+            }
+        }
+        $string = serialize($comments_cache_unsorted);
+        file_put_contents('cache/index/index-comment-unsorted.txt', print_r($string, true));
+
+        $tmp = array();
+        $tmp = glob('content/comment/*/*.md', GLOB_NOSORT);
+
+        if (is_array($tmp)) {
+            foreach ($tmp as $file) {
+                $comments_cache_sorted[] = pathinfo($file);
+            }
+        }
+        usort($comments_cache_sorted, "sortfile");
+        $string = serialize($comments_cache_sorted);
+        file_put_contents('cache/index/index-comment-sorted.txt', print_r($string, true));
     } elseif ($type === 'page') {
         $page_cache = glob('content/static/*.md', GLOB_NOSORT);
         $string = serialize($page_cache);
@@ -284,6 +423,7 @@ function rebuilt_cache($type)
         file_put_contents('cache/index/index-category.txt', print_r($string, true));
     } elseif ($type === 'all') {
         rebuilt_cache('posts');
+        rebuilt_cache('comments');
         rebuilt_cache('page');
         rebuilt_cache('subpage');
         rebuilt_cache('author');
@@ -294,6 +434,44 @@ function rebuilt_cache($type)
         unlink($file);
     }
 
+}
+
+// Get all comments
+function get_comments_all($pcomments, $page = 1, $perpage = 0)
+{
+    if (empty($pcomments)) {
+        $pcomments = get_comment_sorted();
+    }
+
+    // Extract a specific page with results
+    $pcomments = array_slice($pcomments, ($page - 1) * $perpage, $perpage);
+
+    // Get all data comment
+    $tmp = array();
+    foreach($pcomments as $k => $v) {
+        // Read data
+        $content = file_get_contents($v['dirname'] . '/' . $v['basename']);
+
+        $ex = explode('/', $v['dirname']);
+        $post = find_post(null, null, $ex['2']);
+        
+        $reply = get_content_tag('r', $content);
+        if(empty($reply)) {
+            $comments = new stdClass;
+            $comments->num = $v['filename'];
+            $comments->comment = $v['dirname'];
+            $comments->name = get_content_tag('n', $content);
+            $comments->email = get_content_tag('e', $content);
+            $comments->url = get_content_tag('u', $content);
+            $comments->reply = get_content_tag('r', $content);
+            $comments->time = get_content_tag('time', $content);
+            // Get the contents and convert it to HTML
+            $comments->body = MarkdownExtra::defaultTransform(remove_html_comments($content));
+            $tmp[] = $comments;
+        }
+    }
+
+    return $tmp;
 }
 
 // Return blog posts.
@@ -3297,13 +3475,13 @@ function get_language()
 
 }
 
-function format_date($date)
+function format_date($date, $timeago = false)
 {
 
     $date_format = config('date.format');
 
     // Timeago
-    if(config('timeago.format') == 'true') {
+    if(config('timeago.format') == 'true' || $timeago == 'true') {
         $time = time() - $date;
         if ($time < 60) {
         return ( $time > 1 ) ? $time . ' ' . i18n('Seconds_ago') : i18n('A_second_ago');

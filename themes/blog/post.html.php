@@ -41,6 +41,7 @@
                 </div>
                 <div class="desc text-left" itemprop="articleBody">                                   
                     <?php echo $p->body; ?>
+                    <?php echo comment($comment, $p->url); ?>
                 </div><!--//desc-->
                 <div style="margin-top:30px;position:relative;">
                     <span class="tags"><i class="fa fa-tags"></i> <?php echo $p->tag;?></span> 

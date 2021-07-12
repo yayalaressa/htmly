@@ -729,6 +729,53 @@ get('/front/edit', function () {
     }
 });
 
+// Show the comments
+get('/admin/comments', function() {
+
+    if (login()) {
+        if(is_admin()) {
+
+            config('views.root', 'system/admin/views');
+
+            $page = from($_GET, 'page');
+            $page = $page ? (int)$page : 1;
+            $perpage = 20;
+
+            $comments_all = get_comments_all(null, $page, $perpage);
+
+            $total = '';
+
+            if (empty($comments_all) || $page < 1) {
+                // a non-existing page
+                render('no-posts', array(
+                    'title' => i18n('All_Comments list') . ' - ' . blog_title(),
+                    'description' => strip_tags(blog_description()),
+                    'canonical' => site_url(),
+                    'bodyclass' => 'no-posts',
+                    'breadcrumb' => '<a href="' . site_url() . '">' . config('breadcrumb.home') . '</a> &#187; All comments list'
+                ));
+                die;
+            }
+
+            render('comments-list', array(
+                'title' => i18n('All_Comments list') . ' - ' . blog_title(),
+                'description' => strip_tags(blog_description()),
+                'canonical' => site_url(),
+                'heading' => i18n('All_comments'),
+                'comments_all' => $comments_all,
+                'is_admin' => true,
+                'bodyclass' => 'comments-list',
+                'breadcrumb' => '<a href="' . site_url() . '">' . config('breadcrumb.home') . '</a> &#187; All Comments list',
+                'pagination' => has_pagination($total, $perpage, $page)
+            ));
+        }
+    } else {
+        $login = site_url() . 'login';
+        header("location: $login");
+    }
+
+});
+
 // Show the "Add content" page
 get('/add/content', function () {
 
@@ -2625,6 +2672,9 @@ get('/post/:name', function ($name) {
         $blog = '';
     }
     
+    // Get comment
+    $comment = array();
+
     $vroot = rtrim(config('views.root'), '/');
     
     $lt = $vroot . '/layout--post--' . $current->ct . '.html.php'; 
@@ -2656,6 +2706,160 @@ get('/post/:name', function ($name) {
         'canonical' => $current->url,
         'p' => $current,
         'author' => $author,
+        'comment' => $comment,
+        'bodyclass' => 'in-post category-' . $current->ct . ' type-' . $current->type,
+        'breadcrumb' => '<style>.breadcrumb-list {margin:0; padding:0;} .breadcrumb-list li {display: inline-block; list-style: none;}</style><ol class="breadcrumb-list" itemscope itemtype="http://schema.org/BreadcrumbList"><li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem"><a itemprop="item" href="' . site_url() . '"><span itemprop="name">' . config('breadcrumb.home') . '</span></a><meta itemprop="position" content="1" /></li> &#187; '. $blog . '<li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem">' . $current->categoryb . '<meta itemprop="position" content="3" /></li>' . ' &#187; ' . $current->title . '</ol>',
+        'prev' => has_prev($prev),
+        'next' => has_next($next),
+        'type' => $var,
+        'is_post' => true,
+    ), $layout);
+
+});
+
+// Post comment on Show blog post without year-month
+post('/post/:name', function ($name) {
+
+    $proper = is_csrf_proper(from($_REQUEST, 'csrf_token'));
+    $captcha = isCaptcha(from($_REQUEST, 'g-recaptcha-response'));
+
+    if (isset($_GET['search'])) {
+        $search = _h($_GET['search']);
+        $url = site_url() . 'search/' . remove_accent($search);
+        header("Location: $url");
+    }
+
+    if (config('permalink.type') != 'post') {
+        $post = find_post(null, null, $name);
+        $current = $post['current'];
+        $redir = site_url() . date('Y/m', $current->date) . '/' . $name;
+        header("location: $redir", TRUE, 301);
+    }
+
+    if (config("views.counter") != "true") {
+        if (!login()) {
+            file_cache($_SERVER['REQUEST_URI']);
+        }
+    }
+
+    $post = find_post(null, null, $name);
+
+    $current = $post['current'];
+
+    if (!$current) {
+        not_found();
+    }
+
+    if (config("views.counter") == "true") {
+        add_view($current->file);
+
+        if (!login()) {
+            file_cache($_SERVER['REQUEST_URI']);
+        }
+    }
+
+    $author = new stdClass;
+    $author->url = $current->authorUrl;
+    $author->name = $current->authorName;
+    $author->about = $current->authorAbout;
+
+    if (array_key_exists('prev', $post)) {
+        $prev = $post['prev'];
+    } else {
+        $prev = array();
+    }
+
+    if (array_key_exists('next', $post)) {
+        $next = $post['next'];
+    } else {
+        $next = array();
+    }
+    
+    if (isset($current->image)) {
+        $var = 'imagePost';
+    } elseif (isset($current->link)) {
+        $var = 'linkPost';
+    } elseif (isset($current->quote)) {
+        $var = 'quotePost';
+    } elseif (isset($current->audio)) {
+        $var = 'audioPost';
+    } elseif (isset($current->video)) {
+        $var = 'videoPost'; }
+    else {
+        $var = 'blogPost';
+    }
+    
+    if (config('blog.enable') === 'true') {
+        $blog = '<li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem"><a itemprop="item" href="' . site_url() . 'blog"><span itemprop="name">Blog</span></a><meta itemprop="position" content="2" /></li> &#187; ';
+    } else {
+        $blog = '';
+    }
+    
+    // Get comment
+    $comment = array();
+    $comment['cName'] = from($_REQUEST, 'comment_name');
+    $comment['cEmail'] = from($_REQUEST, 'comment_email');
+    $comment['cUrl'] = from($_REQUEST, 'comment_url');
+    $comment['cContent'] = from($_REQUEST, 'comment_content');
+    $comment['cReply'] = from($_REQUEST, 'comment_reply');
+    
+    // Get data comment
+    if($proper && $captcha && !empty($comment['cName']) && !empty($comment['cEmail']) && filter_var($comment['cEmail'], FILTER_VALIDATE_EMAIL) && !empty($comment['cContent'])) {
+        if(empty($comment['cUrl'])) {
+            $comment['cUrl'] = site_url();
+        }
+        add_comment($current->url, $name, $comment['cName'], $comment['cEmail'], $comment['cUrl'], $comment['cContent'], $comment['cReply']);
+    } else {
+        $comment['error'] = '';
+        if(!$captcha) {
+            $comment['error'] .= '<div>reCaptcha not correct!</div>';
+        }
+        if(empty($comment['cName'])) {
+            $comment['error'] .= '<div>Name field is required.</div>';
+        }
+        if(empty($comment['cEmail'])) {
+            $comment['error'] .= '<div>Email field is required.</div>';
+        }
+        if(!filter_var($comment['cEmail'], FILTER_VALIDATE_EMAIL)) {
+            $comment['error'] .= '<div>Email invalid format.</div>';
+        }
+        if(empty($comment['cContent'])) {
+            $comment['error'] .= '<div>Content field is required.</div>';
+        }
+    }
+
+    $vroot = rtrim(config('views.root'), '/');
+    
+    $lt = $vroot . '/layout--post--' . $current->ct . '.html.php'; 
+    $pt = $vroot . '/layout--post--' . $current->type . '.html.php';
+    $ls = $vroot . '/layout--post.html.php'; 
+    if (file_exists($lt)) {
+        $layout = 'layout--post--' . $current->ct;
+    } else if (file_exists($pt)) {
+        $layout = 'layout--post--' . $current->type;
+    } else if (file_exists($ls)) {
+        $layout = 'layout--post';
+    } else {
+        $layout = '';
+    }
+    
+    $pv = $vroot . '/post--' . $current->ct . '.html.php'; 
+    $pvt = $vroot . '/post--' . $current->type . '.html.php'; 
+    if (file_exists($pv)) {
+        $pview = 'post--' . $current->ct;
+    } else if(file_exists($pvt)) {
+        $pview = 'post--' . $current->type;
+    } else {
+        $pview = 'post';
+    }
+
+    render($pview, array(
+        'title' => $current->title . ' - ' . blog_title(),
+        'description' => $current->description,
+        'canonical' => $current->url,
+        'p' => $current,
+        'author' => $author,
+        'comment' => $comment,
         'bodyclass' => 'in-post category-' . $current->ct . ' type-' . $current->type,
         'breadcrumb' => '<style>.breadcrumb-list {margin:0; padding:0;} .breadcrumb-list li {display: inline-block; list-style: none;}</style><ol class="breadcrumb-list" itemscope itemtype="http://schema.org/BreadcrumbList"><li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem"><a itemprop="item" href="' . site_url() . '"><span itemprop="name">' . config('breadcrumb.home') . '</span></a><meta itemprop="position" content="1" /></li> &#187; '. $blog . '<li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem">' . $current->categoryb . '<meta itemprop="position" content="3" /></li>' . ' &#187; ' . $current->title . '</ol>',
         'prev' => has_prev($prev),
@@ -2927,12 +3131,13 @@ get('/post/:name/delete', function ($name) {
 });
 
 // Get deleted data from blog post
-post('/post/:name/delete', function () {
+post('/post/:name/delete', function ($name) {
 
     $proper = is_csrf_proper(from($_REQUEST, 'csrf_token'));
     if ($proper && login()) {
         $file = from($_REQUEST, 'file');
         $destination = from($_GET, 'destination');
+        delete_comment($name);
         delete_post($file, $destination);
     }
 });
@@ -3649,6 +3854,158 @@ get('/:year/:month/:name', function ($year, $month, $name) {
         'canonical' => $current->url,
         'p' => $current,
         'author' => $author,
+        'comment' => array(),
+        'bodyclass' => 'in-post category-' . $current->ct . ' type-' . $current->type,
+        'breadcrumb' => '<style>.breadcrumb-list {margin:0; padding:0;} .breadcrumb-list li {display: inline-block; list-style: none;}</style><ol class="breadcrumb-list" itemscope itemtype="http://schema.org/BreadcrumbList"><li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem"><a itemprop="item" href="' . site_url() . '"><span itemprop="name">' . config('breadcrumb.home') . '</span></a><meta itemprop="position" content="1" /></li> &#187; '. $blog . '<li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem">' . $current->categoryb . '<meta itemprop="position" content="3" /></li>' . ' &#187; ' . $current->title . '</ol>',
+        'prev' => has_prev($prev),
+        'next' => has_next($next),
+        'type' => $var,
+        'is_post' => true,
+    ), $layout);
+
+});
+
+// Post comment on Show blog post with year-month
+post('/:year/:month/:name', function ($year, $month, $name) {
+
+    $proper = is_csrf_proper(from($_REQUEST, 'csrf_token'));
+    $captcha = isCaptcha(from($_REQUEST, 'g-recaptcha-response'));
+
+    if (isset($_GET['search'])) {
+        $search = _h($_GET['search']);
+        $url = site_url() . 'search/' . remove_accent($search);
+        header("Location: $url");
+    }
+    
+    if (config('permalink.type') == 'post') {
+        $redir = site_url() . 'post/' . $name;
+        header("location: $redir", TRUE, 301);
+    }
+
+    if (config("views.counter") != "true") {
+        if (!login()) {
+            file_cache($_SERVER['REQUEST_URI']);
+        }
+    }
+
+    $post = find_post($year, $month, $name);
+
+    $current = $post['current'];
+
+    if (!$current) {
+        not_found();
+    }
+
+    if (config("views.counter") == "true") {
+        add_view($current->file);
+
+        if (!login()) {
+            file_cache($_SERVER['REQUEST_URI']);
+        }
+    }
+
+    $author = new stdClass;
+    $author->url = $current->authorUrl;
+    $author->name = $current->authorName;
+    $author->about = $current->authorAbout;
+
+    if (array_key_exists('prev', $post)) {
+        $prev = $post['prev'];
+    } else {
+        $prev = array();
+    }
+
+    if (array_key_exists('next', $post)) {
+        $next = $post['next'];
+    } else {
+        $next = array();
+    }
+    
+    if (isset($current->image)) {
+        $var = 'imagePost';
+    } elseif (isset($current->link)) {
+        $var = 'linkPost';
+    } elseif (isset($current->quote)) {
+        $var = 'quotePost';
+    } elseif (isset($current->audio)) {
+        $var = 'audioPost';
+    } elseif (isset($current->video)) {
+        $var = 'videoPost'; }
+    else {
+        $var = 'blogPost';
+    }
+    
+    if (config('blog.enable') === 'true') {
+        $blog = '<li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem"><a itemprop="item" href="' . site_url() . 'blog"><span itemprop="name">Blog</span></a><meta itemprop="position" content="2" /></li> &#187; ';
+    } else {
+        $blog = '';
+    }
+    
+    // Get comment
+    $comment = array();
+    $comment['cName'] = from($_REQUEST, 'comment_name');
+    $comment['cEmail'] = from($_REQUEST, 'comment_email');
+    $comment['cUrl'] = from($_REQUEST, 'comment_url');
+    $comment['cContent'] = from($_REQUEST, 'comment_content');
+    $comment['cReply'] = from($_REQUEST, 'comment_reply');
+    
+    // Get data comment
+    if($proper && $captcha && !empty($comment['cName']) && !empty($comment['cEmail']) && filter_var($comment['cEmail'], FILTER_VALIDATE_EMAIL) && !empty($comment['cContent'])) {
+        if(empty($comment['cUrl'])) {
+            $comment['cUrl'] = site_url();
+        }
+        add_comment($current->url, $name, $comment['cName'], $comment['cEmail'], $comment['cUrl'], $comment['cContent'], $comment['cReply']);
+    } else {
+        $comment['error'] = '';
+        if(!$captcha) {
+            $comment['error'] .= '<div>reCaptcha not correct!.</div>';
+        }
+        if(empty($comment['cName'])) {
+            $comment['error'] .= '<div>Name field is required.</div>';
+        }
+        if(empty($comment['cEmail'])) {
+            $comment['error'] .= '<div>Email field is required.</div>';
+        }
+        if(!filter_var($comment['cEmail'], FILTER_VALIDATE_EMAIL)) {
+            $comment['error'] .= '<div>Email invalid format.</div>';
+        }
+        if(empty($comment['cContent'])) {
+            $comment['error'] .= '<div>Content field is required.</div>';
+        }
+    }
+
+    $vroot = rtrim(config('views.root'), '/');
+    
+    $lt = $vroot . '/layout--post--' . $current->ct . '.html.php'; 
+    $pt = $vroot . '/layout--post--' . $current->type . '.html.php';
+    $ls = $vroot . '/layout--post.html.php'; 
+    if (file_exists($lt)) {
+        $layout = 'layout--post--' . $current->ct;
+    } else if (file_exists($pt)) {
+        $layout = 'layout--post--' . $current->type;
+    } else if (file_exists($ls)) {
+        $layout = 'layout--post';
+    } else {
+        $layout = '';
+    }
+    
+    $pv = $vroot . '/post--' . $current->ct . '.html.php'; 
+    $pvt = $vroot . '/post--' . $current->type . '.html.php'; 
+    if (file_exists($pv)) {
+        $pview = 'post--' . $current->ct;
+    } else if(file_exists($pvt)) {
+        $pview = 'post--' . $current->type;
+    } else {
+        $pview = 'post';
+    }
+
+    render($pview, array(
+        'title' => $current->title . ' - ' . blog_title(),
+        'description' => $current->description,
+        'canonical' => $current->url,
+        'p' => $current,
+        'author' => $author,
+        'comment' => $comment,
         'bodyclass' => 'in-post category-' . $current->ct . ' type-' . $current->type,
         'breadcrumb' => '<style>.breadcrumb-list {margin:0; padding:0;} .breadcrumb-list li {display: inline-block; list-style: none;}</style><ol class="breadcrumb-list" itemscope itemtype="http://schema.org/BreadcrumbList"><li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem"><a itemprop="item" href="' . site_url() . '"><span itemprop="name">' . config('breadcrumb.home') . '</span></a><meta itemprop="position" content="1" /></li> &#187; '. $blog . '<li class="breadcrumb-item" itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem">' . $current->categoryb . '<meta itemprop="position" content="3" /></li>' . ' &#187; ' . $current->title . '</ol>',
         'prev' => has_prev($prev),
@@ -3914,12 +4271,13 @@ get('/:year/:month/:name/delete', function ($year, $month, $name) {
 });
 
 // Get deleted data from blog post
-post('/:year/:month/:name/delete', function () {
+post('/:year/:month/:name/delete', function ($year, $month, $name) {
 
     $proper = is_csrf_proper(from($_REQUEST, 'csrf_token'));
     if ($proper && login()) {
         $file = from($_REQUEST, 'file');
         $destination = from($_GET, 'destination');
+        delete_comment($name); 
         delete_post($file, $destination);
     }
 });
